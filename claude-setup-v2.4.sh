@@ -17,7 +17,7 @@
 # v2.3 변경사항:
 #   - 독립에이전트 플러그인 옵션(--channels) 절대 추가 금지 규칙 명시 (봇 서버 중복 충돌 방지)
 # v2.4 변경사항:
-#   - 전역 enabledPlugins: true → false (봇 서버 자동 로드 차단, 오퍼만 --channels로 실행)
+#   - 전역 enabledPlugins: true 유지 (false로 하면 --channels만으로 플러그인 로드 안 됨)
 #   - 독립에이전트 tmux 소켓: 오퍼와 동일 소켓 사용으로 통일
 #   - 서브에이전트(Agent tool) 사용 규칙 추가 (CLAUDE.md 섹션 2)
 #   - 플러그인 설정 섹션 추가 (CLAUDE.md 시스템 구성)
@@ -124,7 +124,7 @@ cat > "$GLOBAL_CLAUDE/settings.json" << SETTINGS
   "skipDangerousModePermissionPrompt": true,
   "bypassPermissionsConfirmed": true,
   "enabledPlugins": {
-    "telegram@claude-plugins-official": false
+    "telegram@claude-plugins-official": true
   },
   "hooks": {
     "PostToolUse": [
@@ -826,8 +826,8 @@ tmux ($SESSION_NAME 세션)
 - 플러그인만 단독 재시작 불가 → claude 전체 재시작 필요
 
 ### 플러그인 설정
-- 전역: ~/.claude/settings.json → enabledPlugins: false (자동 로드 차단)
-- 프로젝트: $WORKSPACE_DIR/.claude/settings.local.json → enabledPlugins: false (유지)
+- 전역: ~/.claude/settings.json → enabledPlugins: true (오퍼용)
+- 프로젝트: $WORKSPACE_DIR/.claude/settings.local.json → enabledPlugins: false (독립에이전트 플러그인 차단)
 - 오퍼 봇 서버: 시작 스크립트의 --channels plugin:telegram으로만 실행
 - 다른 claude 인스턴스에서 봇 서버 자동 실행 안 됨 → 충돌 방지
 
@@ -1251,7 +1251,7 @@ fi
 echo "[3/13] 전역 settings.json..."
 if [ -f "$GLOBAL_CLAUDE/settings.json" ]; then
   grep -q "extraKnownMarketplaces" "$GLOBAL_CLAUDE/settings.json" && ok "마켓플레이스 설정 있음" || fail "마켓플레이스 설정 없음"
-  grep -q '"telegram@claude-plugins-official": false' "$GLOBAL_CLAUDE/settings.json" && ok "텔레그램 플러그인 자동 로드 차단(false)" || fail "enabledPlugins가 false가 아님 (봇 서버 충돌 위험)"
+  grep -q '"telegram@claude-plugins-official": true' "$GLOBAL_CLAUDE/settings.json" && ok "텔레그램 플러그인 활성화(true)" || fail "텔레그램 플러그인 미활성화"
   grep -q "PostToolUse" "$GLOBAL_CLAUDE/settings.json" && ok "하트비트 hook 설정됨" || fail "하트비트 hook 없음"
   BACKUP_COUNT=$(ls "$GLOBAL_CLAUDE/settings.json.bak."* 2>/dev/null | wc -l)
   [ "$BACKUP_COUNT" -gt 0 ] && info "백업 파일: ${BACKUP_COUNT}개"
