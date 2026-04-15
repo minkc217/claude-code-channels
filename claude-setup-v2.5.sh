@@ -264,7 +264,8 @@ export PATH="\$BUN_INSTALL/bin:$HOME_DIR/.local/bin:/usr/local/bin:/usr/bin:/bin
 export LANG=C.UTF-8
 export LC_ALL=C.UTF-8
 tmux -S \$TMUX_SOCKET kill-session -t $SESSION_NAME 2>/dev/null || true
-pkill -f "telegram.*start" 2>/dev/null || true
+pkill -9 -f "telegram.*start" 2>/dev/null || true
+pkill -9 -f "bun server.ts" 2>/dev/null || true
 sleep 2
 
 cd $AGENT_DIR
@@ -410,7 +411,8 @@ if ! pgrep -f "claude --channels" > /dev/null 2>&1; then
   check_restart_loop
   send_telegram "⚠️ 클로드 코드 프로세스가 죽어있어서 재시작합니다..."
   tmux -S $TMUX_SOCKET kill-session -t $SESSION_NAME 2>/dev/null || true
-  pkill -f "telegram.*start" 2>/dev/null || true
+  pkill -9 -f "telegram.*start" 2>/dev/null || true
+  pkill -9 -f "bun server.ts" 2>/dev/null || true
   sleep 2
   mkdir -p "$HEARTBEAT_DIR"
   date +%s > "$OPERATOR_HEARTBEAT"
@@ -427,7 +429,7 @@ if ! pgrep -f "telegram.*start" > /dev/null 2>&1; then
   check_restart_loop
   send_telegram "⚠️ 텔레그램 플러그인이 죽어서 재시작합니다..."
   tmux -S $TMUX_SOCKET kill-session -t $SESSION_NAME 2>/dev/null || true
-  pkill -f "claude --channels" 2>/dev/null || true
+  pkill -9 -f "claude --channels" 2>/dev/null || true
   sleep 2
   mkdir -p "$HEARTBEAT_DIR"
   date +%s > "$OPERATOR_HEARTBEAT"
@@ -447,8 +449,9 @@ if ! echo "$TELEGRAM_HEALTH" | grep -q '"ok":true'; then
   check_restart_loop
   send_telegram "⚠️ 텔레그램 Bot API 헬스체크 실패 → 재시작합니다..."
   tmux -S $TMUX_SOCKET kill-session -t $SESSION_NAME 2>/dev/null || true
-  pkill -f "claude --channels" 2>/dev/null || true
-  pkill -f "telegram.*start" 2>/dev/null || true
+  pkill -9 -f "claude --channels" 2>/dev/null || true
+  pkill -9 -f "telegram.*start" 2>/dev/null || true
+  pkill -9 -f "bun server.ts" 2>/dev/null || true
   sleep 2
   mkdir -p "$HEARTBEAT_DIR"
   date +%s > "$OPERATOR_HEARTBEAT"
@@ -468,8 +471,9 @@ if [ -n "$TELEGRAM_PID" ]; then
     check_restart_loop
     send_telegram "⚠️ 텔레그램 플러그인이 멈춤 상태(${PROC_STATE}) → 재시작합니다..."
     tmux -S $TMUX_SOCKET kill-session -t $SESSION_NAME 2>/dev/null || true
-    pkill -f "claude --channels" 2>/dev/null || true
-    pkill -f "telegram.*start" 2>/dev/null || true
+    pkill -9 -f "claude --channels" 2>/dev/null || true
+    pkill -9 -f "telegram.*start" 2>/dev/null || true
+    pkill -9 -f "bun server.ts" 2>/dev/null || true
     sleep 2
     mkdir -p "$HEARTBEAT_DIR"
     date +%s > "$OPERATOR_HEARTBEAT"
@@ -505,8 +509,9 @@ if [ "$PIPELINE_ACTIVE" = true ] && [ "$IND_AGENTS_EXIST" = true ] && [ -f "$OPE
     check_restart_loop
     send_telegram "⚠️ 오퍼가 파이프라인 실행 중 ${ELAPSED}초간 무응답(hang) → 강제 재시작합니다..."
     tmux -S $TMUX_SOCKET kill-session -t $SESSION_NAME 2>/dev/null || true
-    pkill -f "claude --channels" 2>/dev/null || true
-    pkill -f "telegram.*start" 2>/dev/null || true
+    pkill -9 -f "claude --channels" 2>/dev/null || true
+    pkill -9 -f "telegram.*start" 2>/dev/null || true
+    pkill -9 -f "bun server.ts" 2>/dev/null || true
     sleep 2
     mkdir -p "$HEARTBEAT_DIR"
     date +%s > "$OPERATOR_HEARTBEAT"
