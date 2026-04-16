@@ -264,6 +264,7 @@ export PATH="\$BUN_INSTALL/bin:$HOME_DIR/.local/bin:/usr/local/bin:/usr/bin:/bin
 export LANG=C.UTF-8
 export LC_ALL=C.UTF-8
 tmux -S \$TMUX_SOCKET kill-session -t $SESSION_NAME 2>/dev/null || true
+pkill -9 -f "claude --channels" 2>/dev/null || true
 pkill -9 -f "telegram.*start" 2>/dev/null || true
 pkill -9 -f "bun server.ts" 2>/dev/null || true
 sleep 2
