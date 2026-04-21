@@ -265,6 +265,24 @@ fi
 cat > "$START_SCRIPT" << EOF
 #!/bin/bash
 TMUX_SOCKET=$TMUX_SOCKET
+START_LOG=$HOME_DIR/claude-${AGENT_NAME}-start.log
+
+# 모델 설정 (2026-04-18 Phase 2 + 폴백)
+PERMANENT_MODEL="claude-opus-4-7"
+TEMP_OVERRIDE_FILE="/tmp/claude-${AGENT_NAME}-model-override"
+ENV_FILE="$HOME_DIR/.claude/channels/telegram/.env"
+
+notify_telegram() {
+  if [ -f "\$ENV_FILE" ]; then
+    local token=\$(grep '^TELEGRAM_BOT_TOKEN=' "\$ENV_FILE" | cut -d'=' -f2)
+    local chat=\$(grep '^TELEGRAM_CHAT_ID=' "\$ENV_FILE" | cut -d'=' -f2)
+    if [ -n "\$token" ] && [ -n "\$chat" ]; then
+      curl -s -m 10 "https://api.telegram.org/bot\${token}/sendMessage" \\
+        -d "chat_id=\${chat}" --data-urlencode "text=\$1" > /dev/null 2>&1
+    fi
+  fi
+}
+log() { echo "[\$(date -Iseconds)] \$1" | tee -a "\$START_LOG"; }
 
 export BUN_INSTALL="$HOME_DIR/.bun"
 export PATH="\$BUN_INSTALL/bin:$HOME_DIR/.local/bin:/usr/local/bin:/usr/bin:/bin"
@@ -276,19 +294,58 @@ pkill -9 -f "telegram.*start" 2>/dev/null || true
 pkill -9 -f "bun server.ts" 2>/dev/null || true
 sleep 2
 
-# Groq 음성 패치 자가 복구 (GROQ_API_KEY 있을 때만, 이미 패치됐으면 skip)
 if [ -x $HOME_DIR/claude-${AGENT_NAME}-voice-patch.py ]; then
   python3 $HOME_DIR/claude-${AGENT_NAME}-voice-patch.py 2>&1 | grep -v "^\$" || true
 fi
 
-cd $AGENT_DIR
+ATTEMPT_LABELS=()
+ATTEMPT_FLAGS=()
+if [ -f "\$TEMP_OVERRIDE_FILE" ]; then
+  TEMP_MODEL=\$(head -1 "\$TEMP_OVERRIDE_FILE" | tr -d '[:space:]')
+  rm -f "\$TEMP_OVERRIDE_FILE"
+  if [ -n "\$TEMP_MODEL" ]; then
+    ATTEMPT_LABELS+=("temp:\$TEMP_MODEL")
+    ATTEMPT_FLAGS+=("--model \$TEMP_MODEL")
+  fi
+fi
+if [ -n "\$PERMANENT_MODEL" ]; then
+  ATTEMPT_LABELS+=("permanent:\$PERMANENT_MODEL")
+  ATTEMPT_FLAGS+=("--model \$PERMANENT_MODEL")
+fi
+ATTEMPT_LABELS+=("default")
+ATTEMPT_FLAGS+=("")
 
-tmux -u -S \$TMUX_SOCKET new-session -d -s $SESSION_NAME \\
-  "claude --continue --fork-session --channels plugin:telegram@claude-plugins-official --dangerously-skip-permissions"
+cd $AGENT_DIR
+SUCCESS=false
+for i in "\${!ATTEMPT_LABELS[@]}"; do
+  LABEL="\${ATTEMPT_LABELS[\$i]}"
+  FLAG="\${ATTEMPT_FLAGS[\$i]}"
+  log "기동 시도 [\$((i+1))/\${#ATTEMPT_LABELS[@]}]: \$LABEL"
+  tmux -S \$TMUX_SOCKET kill-session -t $SESSION_NAME 2>/dev/null || true
+  pkill -9 -f "claude.*--channels" 2>/dev/null || true
+  sleep 1
+  tmux -u -S \$TMUX_SOCKET new-session -d -s $SESSION_NAME \\
+    "claude --continue --fork-session \$FLAG --channels plugin:telegram@claude-plugins-official --dangerously-skip-permissions"
+  sleep 6
+  if pgrep -f "claude.*--channels" > /dev/null 2>&1; then
+    log "기동 성공: \$LABEL"
+    SUCCESS=true
+    if [ "\$i" -gt 0 ]; then
+      notify_telegram "⚠️ [ALERT type=model_fallback severity=warning] 모델 [\${ATTEMPT_LABELS[0]}] 기동 실패 → [\$LABEL] 폴백 성공"
+    fi
+    break
+  fi
+  log "기동 실패: \$LABEL"
+done
+
+if [ "\$SUCCESS" = false ]; then
+  log "모든 기동 시도 실패"
+  notify_telegram "🚨 [ALERT type=start_fail severity=critical] start.sh: 모든 모델 시도 실패"
+fi
 
 sleep 2
-chmod 700 \$TMUX_SOCKET
-tmux -S \$TMUX_SOCKET ls
+chmod 700 \$TMUX_SOCKET 2>/dev/null || true
+tmux -S \$TMUX_SOCKET ls 2>&1 | tee -a "\$START_LOG"
 EOF
 
 chmod +x "$START_SCRIPT"
@@ -1126,16 +1183,19 @@ cat > "$IND_SCRIPT" << 'IND_EOF'
 #!/bin/bash
 # 독립에이전트를 별도 tmux 세션에서 실행
 # 주의: --channels, plugin:telegram 등 플러그인 옵션 절대 추가 금지 (봇 서버 중복 → 충돌)
-# 사용법: ./run-independent-agent.sh <에이전트이름> <프롬프트파일> <출력파일> [작업디렉토리]
+# 사용법: ./run-independent-agent.sh <에이전트이름> <프롬프트파일> <출력파일> [작업디렉토리] [모델]
+#   [모델] 생략 시 DEFAULT_MODEL(sonnet 4.6) 사용. 지정 시 해당 실행만 다른 모델로 동작, 다음 실행은 다시 기본값.
 
 TMUX_SOCKET=__TMUX_SOCKET__
 HEARTBEAT_DIR=__HEARTBEAT_DIR__
 DEFAULT_WORKDIR=__WORKSPACE_DIR__
+DEFAULT_MODEL="claude-sonnet-4-6"
 
 AGENT_NAME=$1
 PROMPT_FILE=$2
 OUTPUT_FILE=$3
 REQUESTED_WORKDIR=${4:-$DEFAULT_WORKDIR}
+MODEL=${5:-$DEFAULT_MODEL}
 
 # 2026-04-18 C 수정: WORK_DIR을 workspace로 강제 (플러그인 충돌 방지)
 if [ "$REQUESTED_WORKDIR" != "$DEFAULT_WORKDIR" ] && [ "${REQUESTED_WORKDIR#$DEFAULT_WORKDIR/}" = "$REQUESTED_WORKDIR" ]; then
@@ -1199,7 +1259,7 @@ HB_PID=\$!
 
 cd "$WORK_DIR"
 
-claude -p "\$(cat $PROMPT_FILE)" --dangerously-skip-permissions &
+claude -p "\$(cat $PROMPT_FILE)" --model $MODEL --dangerously-skip-permissions &
 CLAUDE_PID=\$!
 
 # claude 프로세스 완료 대기
@@ -1231,7 +1291,7 @@ tmux -S $TMUX_SOCKET new-session -d -s "$SESSION" "bash $INNER_SCRIPT"
 # 초기 하트비트
 date +%s > "$HEARTBEAT_FILE"
 
-echo "독립에이전트 시작: $SESSION (작업디렉토리: $WORK_DIR)"
+echo "독립에이전트 시작: $SESSION (작업디렉토리: $WORK_DIR, 모델: $MODEL)"
 echo "완료 확인: ${OUTPUT_FILE}.done 또는 ${OUTPUT_FILE}.error"
 IND_EOF
 
@@ -1406,7 +1466,7 @@ tmux ($SESSION_NAME 세션)
 - 패치 위치: server.ts의 bot.on('message:voice') 핸들러 + transcribeVoice() 함수
 - 모델: whisper-large-v3-turbo, 언어: ko
 - 무료 한도: 하루 2,000건, 시간당 7,200초
-- 주의: 플러그인 업데이트 시 패치 덮어씌워짐 → start.sh의 voice-patch.py가 자동 재적용
+- 주의: 플러그인 업데이트 시 패치 덮어씌워짐 → start.sh가 매 기동 시 voice-patch.py 자동 재적용 (§12 voice_patch_restore 🟢)
 
 ### 플러그인 설정
 - 전역: ~/.claude/settings.json → enabledPlugins: true (오퍼용)
@@ -1465,8 +1525,11 @@ tmux ($SESSION_NAME 세션)
 
 ### 스크립트 사용법
 \`\`\`bash
-$IND_SCRIPT <에이전트이름> <프롬프트파일> <출력파일> [작업디렉토리]
-# 기본 작업디렉토리: $WORKSPACE_DIR/
+$IND_SCRIPT <에이전트이름> <프롬프트파일> <출력파일> [작업디렉토리] [모델]
+# 기본 작업디렉토리: $WORKSPACE_DIR/ (강제, 4번째 인수는 무시됨)
+# 기본 모델: claude-sonnet-4-6 (5번째 인수 생략 시)
+#   - 일회성 변경: 5번째 인수로 다른 모델 지정. 다음 실행은 다시 기본값.
+#   - 예: claude-opus-4-7 / claude-haiku-4-5-20251001
 # 완료: <출력파일>.done 존재
 # 실패: <출력파일>.error 존재
 \`\`\`
@@ -1747,6 +1810,36 @@ daily-review.sh가 cron 실행으로 다음 전송:
 4. 강등 후보 (이상 감지된 type)
 5. 허용 목록 변경 이력
 6. 시스템 상태 스냅샷
+
+## 14. 모델 전환 명령 처리 (Phase 2)
+
+### 독립에이전트 모델 (일회성 인수)
+- run-independent-agent.sh 5번째 인수로 모델 ID 전달
+- 기본값: DEFAULT_MODEL="claude-sonnet-4-6"
+- 생략 시 기본값, 지정 시 해당 실행만, 다음은 다시 기본값
+
+### 오퍼 모델 (영구/임시 분리)
+- 영구: start.sh의 PERMANENT_MODEL 변수 수정 → 재시작 필요
+- 임시: /tmp/claude-${AGENT_NAME}-model-override 파일에 모델 ID 기록 → start.sh가 읽고 즉시 삭제 → 1회 적용 후 자동 복귀
+- 우선순위: 임시 > 영구 > 기본(플래그 없음)
+
+### 텔레그램 명령 포맷 (오퍼 수동 해석)
+- "독립 모델 sonnet으로" → 5번째 인수로 전달
+- "오퍼 모델 임시 opus-4.6" → 오버라이드 파일 작성 후 kill
+- "오퍼 모델 영구 opus-4.6" → start.sh 수정 후 kill
+- "오퍼 모델 기본으로" → PERMANENT_MODEL="" 수정 후 kill
+
+### 검증 원칙
+- 새 모델 ID는 독립 테스트로 먼저 검증
+- 검증 실패 시 오퍼 적용 금지 (watchdog 루프 위험)
+- 공식 ID: claude-opus-4-7 / claude-opus-4-6 / claude-sonnet-4-6 / claude-haiku-4-5-20251001
+
+### 무감 재시작 절차
+1. 파일 수정(영구) 또는 오버라이드 작성(임시)
+2. 텔로 "X초 후 전환" 사전 알림
+3. pkill -9 -f "claude.*--channels"
+4. watchdog 1분 내 복구 (--continue --fork-session)
+5. 재기동 후 "전환 완료" 알림
 CLAUDE_OP
 
 if [ -f "$AGENT_DIR/CLAUDE.md" ]; then
