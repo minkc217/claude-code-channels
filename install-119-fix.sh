@@ -16,7 +16,7 @@ echo "========================================"
 echo ""
 
 # 1. 119 버전 디스크 존재 확인 (없으면 패치 무용)
-echo "[1/5] 119 버전 파일 확인..."
+echo "[1/6] 119 버전 파일 확인..."
 if [ ! -x "/home/hsy/.local/share/claude/versions/2.1.119" ]; then
   echo "  ❌ /home/hsy/.local/share/claude/versions/2.1.119 없음"
   echo "  먼저 119 버전이 디스크에 있어야 합니다. 패치 중단."
@@ -25,7 +25,7 @@ fi
 echo "  ✓ 119 버전 존재"
 
 # 2. 기존 start.sh 백업
-echo "[2/5] 기존 start.sh 백업..."
+echo "[2/6] 기존 start.sh 백업..."
 if [ -f "$TARGET" ]; then
   cp "$TARGET" "$BACKUP"
   echo "  ✓ 백업: $BACKUP"
@@ -34,7 +34,7 @@ else
 fi
 
 # 3. 새 start.sh 다운로드
-echo "[3/5] 새 start.sh 다운로드..."
+echo "[3/6] 새 start.sh 다운로드..."
 if curl -fsSL "$REPO_URL/$SOURCE_FILE" -o "$TARGET"; then
   echo "  ✓ 다운로드 완료"
 else
@@ -47,12 +47,26 @@ else
 fi
 
 # 4. 실행 권한
-echo "[4/5] 실행 권한 부여..."
+echo "[4/6] 실행 권한 부여..."
 chmod +x "$TARGET"
 echo "  ✓ chmod +x 완료"
 
-# 5. claude 강제 종료 (재기동 트리거)
-echo "[5/5] claude 재기동 트리거..."
+# 5. 심링크를 119로 정리
+echo "[5/6] 심링크 119로 정리..."
+SYMLINK="/home/hsy/.local/bin/claude"
+TARGET_119="/home/hsy/.local/share/claude/versions/2.1.119"
+if [ -L "$SYMLINK" ] || [ ! -e "$SYMLINK" ]; then
+  if ln -sfn "$TARGET_119" "$SYMLINK" 2>/dev/null; then
+    echo "  ✓ 심링크 → 2.1.119"
+  else
+    echo "  ⚠️ 심링크 변경 실패 (권한? 운영엔 영향 없음)"
+  fi
+else
+  echo "  ⚠️ $SYMLINK가 심링크가 아님 → 변경 건너뜀"
+fi
+
+# 6. claude 강제 종료 (재기동 트리거)
+echo "[6/6] claude 재기동 트리거..."
 pkill -9 -f "claude.*--channels" 2>/dev/null || true
 echo "  ✓ pkill 실행"
 
