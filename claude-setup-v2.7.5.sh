@@ -7,6 +7,7 @@
 #   - start.sh 119 고정: claude 자동 업데이트 차단(DISABLE_AUTOUPDATER=1) + 절대경로(CLAUDE_BIN) 사용
 #   - 2.1.120+ 호환성 이슈 대응 (sandbox 요구로 tmux+plugin 모드에서 멈춤 발생)
 #   - 119 절대경로 직접 호출로 심링크 변경에 무관하게 안정 운영
+#   - 설치 시점에 119 존재 확인 → 없으면 npm install 자동 실행 (미보유 VM도 자동 설치)
 #
 # v2.7 변경사항 (2026-04-24):
 #   - Groq API 키 설치 중 프롬프트 추가 (케이스1: 기존 있음 → 유지/재입력/삭제, 케이스2: 없음 → 입력/건너뛰기)
@@ -145,6 +146,30 @@ read -p "계속 진행할까요? (y/n): " CONFIRM
 if [ "$CONFIRM" != "y" ]; then
   echo "취소되었습니다."
   exit 0
+fi
+
+# --- 2.1.119 버전 사전 확인/설치 (v2.7.5) ---
+# start.sh가 절대경로로 119 호출하므로 설치 시점에 119 존재 보장 필요
+echo ""
+echo "[사전] 2.1.119 버전 파일 확인..."
+CLAUDE_119="$HOME_DIR/.local/share/claude/versions/2.1.119"
+if [ ! -x "$CLAUDE_119" ]; then
+  echo "  ⚠️ 119 없음 → npm으로 자동 설치 시도..."
+  if ! command -v npm >/dev/null 2>&1; then
+    echo "  ❌ npm 명령 없음. 119 수동 설치 후 setup 재실행하세요."
+    exit 1
+  fi
+  if ! npm install -g @anthropic-ai/claude-code@2.1.119; then
+    echo "  ❌ npm install 실패. 네트워크/권한 확인 후 재시도."
+    exit 1
+  fi
+  if [ ! -x "$CLAUDE_119" ]; then
+    echo "  ❌ 설치 후에도 $CLAUDE_119 없음. 수동 점검 필요."
+    exit 1
+  fi
+  echo "  ✓ 119 설치 완료"
+else
+  echo "  ✓ 119 버전 존재"
 fi
 
 PASS=0
@@ -336,6 +361,17 @@ fi
 
 cat > "$START_SCRIPT" << EOF
 #!/bin/bash
+# claude-${AGENT_NAME} 시작 스크립트
+#
+# 변경 이력:
+#   2026-04-18: Phase 2 모델 폴백체인 추가 (임시 → 영구 → 기본)
+#               PERMANENT_MODEL=claude-opus-4-7 영구 모델 설정
+#               임시 오버라이드 파일(/tmp/claude-${AGENT_NAME}-model-override) 지원
+#   2026-04-26: 2.1.120+ sandbox 호환성 이슈 대응 (setup v2.7.5)
+#               - DISABLE_AUTOUPDATER=1 자동 업데이트 차단
+#               - CLAUDE_BIN 절대경로 사용으로 119 강제 (심링크 무시)
+#               - 119 부재 시 npm install 자동 복구 + 알림
+#
 TMUX_SOCKET=$TMUX_SOCKET
 START_LOG=$HOME_DIR/claude-${AGENT_NAME}-start.log
 
@@ -364,6 +400,24 @@ export LC_ALL=C.UTF-8
 export DISABLE_AUTOUPDATER=1
 # 119 고정 절대경로 (심링크 무시)
 CLAUDE_BIN="$HOME_DIR/.local/share/claude/versions/2.1.119"
+
+# 119 부재 시 npm으로 자동 복구 (2026-04-26)
+if [ ! -x "\$CLAUDE_BIN" ]; then
+  log "119 없음 → npm install 자동 시도"
+  if command -v npm >/dev/null 2>&1; then
+    if npm install -g @anthropic-ai/claude-code@2.1.119 >/dev/null 2>&1; then
+      log "119 npm install 성공"
+      notify_telegram "🤖 [자동 처리 완료 type=claude_119_install action=npm_install] 119 파일 부재 → npm으로 자동 설치 완료"
+    else
+      log "119 npm install 실패"
+      notify_telegram "🚨 [ALERT type=claude_119_install_fail severity=critical] 119 파일 부재 + npm install 실패. 수동 점검 필요."
+    fi
+  else
+    log "npm 명령 없음, 119 자동 복구 불가"
+    notify_telegram "🚨 [ALERT type=claude_119_missing severity=critical] 119 파일 없고 npm도 없음. 수동 설치 필요."
+  fi
+fi
+
 tmux -S \$TMUX_SOCKET kill-session -t $SESSION_NAME 2>/dev/null || true
 pkill -9 -f "claude.*--channels" 2>/dev/null || true
 pkill -9 -f "telegram.*start" 2>/dev/null || true

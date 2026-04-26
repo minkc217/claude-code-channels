@@ -1,4 +1,15 @@
 #!/bin/bash
+# claude-agent1 시작 스크립트
+#
+# 변경 이력:
+#   2026-04-18: Phase 2 모델 폴백체인 추가 (임시 → 영구 → 기본)
+#               PERMANENT_MODEL=claude-opus-4-7 영구 모델 설정
+#               임시 오버라이드 파일(/tmp/claude-agent1-model-override) 지원
+#   2026-04-26: 2.1.120+ sandbox 호환성 이슈 대응
+#               - DISABLE_AUTOUPDATER=1 자동 업데이트 차단
+#               - CLAUDE_BIN 절대경로 사용으로 119 강제 (심링크 무시)
+#               - 119 부재 시 npm install 자동 복구 + 알림
+#
 TMUX_SOCKET=/tmp/tmux-claude-agent1
 START_LOG=/home/hsy/claude-agent1-start.log
 
@@ -33,6 +44,24 @@ export LC_ALL=C.UTF-8
 export DISABLE_AUTOUPDATER=1
 # 119 고정 절대경로 (심링크 무시)
 CLAUDE_BIN="/home/hsy/.local/share/claude/versions/2.1.119"
+
+# 119 부재 시 npm으로 자동 복구 (2026-04-26)
+if [ ! -x "$CLAUDE_BIN" ]; then
+  log "119 없음 → npm install 자동 시도"
+  if command -v npm >/dev/null 2>&1; then
+    if npm install -g @anthropic-ai/claude-code@2.1.119 >/dev/null 2>&1; then
+      log "119 npm install 성공"
+      notify_telegram "🤖 [자동 처리 완료 type=claude_119_install action=npm_install] 119 파일 부재 → npm으로 자동 설치 완료"
+    else
+      log "119 npm install 실패"
+      notify_telegram "🚨 [ALERT type=claude_119_install_fail severity=critical] 119 파일 부재 + npm install 실패. 수동 점검 필요."
+    fi
+  else
+    log "npm 명령 없음, 119 자동 복구 불가"
+    notify_telegram "🚨 [ALERT type=claude_119_missing severity=critical] 119 파일 없고 npm도 없음. 수동 설치 필요."
+  fi
+fi
+
 tmux -S $TMUX_SOCKET kill-session -t claude-agent1 2>/dev/null || true
 pkill -9 -f "claude.*--channels" 2>/dev/null || true
 pkill -9 -f "telegram.*start" 2>/dev/null || true

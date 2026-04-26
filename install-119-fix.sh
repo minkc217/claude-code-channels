@@ -15,14 +15,29 @@ echo "  claude-agent1-start.sh 119 고정 패치"
 echo "========================================"
 echo ""
 
-# 1. 119 버전 디스크 존재 확인 (없으면 패치 무용)
+# 1. 119 버전 디스크 존재 확인 (없으면 npm으로 자동 설치 시도)
 echo "[1/6] 119 버전 파일 확인..."
-if [ ! -x "/home/hsy/.local/share/claude/versions/2.1.119" ]; then
-  echo "  ❌ /home/hsy/.local/share/claude/versions/2.1.119 없음"
-  echo "  먼저 119 버전이 디스크에 있어야 합니다. 패치 중단."
-  exit 1
+CLAUDE_119="/home/hsy/.local/share/claude/versions/2.1.119"
+if [ ! -x "$CLAUDE_119" ]; then
+  echo "  ⚠️ 119 없음 → npm으로 자동 설치 시도..."
+  if ! command -v npm >/dev/null 2>&1; then
+    echo "  ❌ npm 명령 없음. 수동 설치 필요. 패치 중단."
+    exit 1
+  fi
+  if npm install -g @anthropic-ai/claude-code@2.1.119 2>&1 | tail -3; then
+    echo "  ✓ npm install 완료"
+  else
+    echo "  ❌ npm install 실패. 네트워크/권한 확인 후 재시도. 패치 중단."
+    exit 1
+  fi
+  if [ ! -x "$CLAUDE_119" ]; then
+    echo "  ❌ npm install 후에도 $CLAUDE_119 없음. 패치 중단."
+    exit 1
+  fi
+  echo "  ✓ 119 설치 완료"
+else
+  echo "  ✓ 119 버전 존재"
 fi
-echo "  ✓ 119 버전 존재"
 
 # 2. 기존 start.sh 백업
 echo "[2/6] 기존 start.sh 백업..."
